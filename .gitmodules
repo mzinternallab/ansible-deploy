@@ -1,0 +1,3 @@
+[submodule "dcams"]
+	path = dcams
+	url = git@code.ornl.gov:does/ansible/ansible_dcams.git

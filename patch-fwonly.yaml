@@ -1,0 +1,127 @@
+- hosts: all
+  gather_facts: false
+  serial: 1
+  tasks:
+    - name: get iDRAC info
+      community.general.idrac_redfish_info:
+        baseuri: "{{idrac_host}}"
+        username: "{{idrac_user}}"
+        password: "{{idrac_password}}"
+        category: Manager
+        command: GetManagerAttributes
+      delegate_to: localhost
+      register: idrac_info
+
+    - name: get firmware inventory
+      dellemc.openmanage.idrac_firmware_info:
+        idrac_ip: "{{idrac_host}}"
+        idrac_user: "{{idrac_user}}"
+        idrac_password: "{{idrac_password}}"
+      delegate_to: localhost
+      register: idrac_firmware
+
+    - name: store firmware facts
+      set_fact:
+        current_idrac_version: "{{ (idrac_info.redfish_facts.entries | selectattr('Id', 'defined') | selectattr('Id', 'equalto', 'iDRACAttributes') | list | first)['Attributes']['Info.1.Version'] }}"
+        current_bios_version: "{{ (idrac_firmware.firmware_info.Firmware | selectattr('ComponentType', 'defined') | selectattr('ComponentType', 'equalto', 'BIOS') | list | first)['VersionString'] }}"
+        current_cpld_version: "{{ (idrac_firmware.firmware_info.Firmware | selectattr('FQDD', 'defined') | selectattr('FQDD', 'equalto', 'CPLD.Embedded.1') | list | first)['VersionString'] }}"
+
+    - when: "desired_bios_version != current_bios_version"
+      block:
+      - name: Upgrade BIOS
+        dellemc.openmanage.redfish_firmware:
+          baseuri: "{{idrac_host}}"
+          username: "{{idrac_user}}"
+          password: "{{idrac_password}}"
+          image_uri: "./updates/BIOS_{{desired_bios_version}}.EXE"
+        delegate_to: localhost
+      - name: Power State
+        delegate_to: localhost
+        community.general.redfish_info:
+          baseuri: "{{idrac_host}}"
+          username: "{{idrac_user}}"
+          password: "{{idrac_password}}"
+          category: Systems
+          command: GetSystemInventory
+        register: bios_power_state
+      - name: Power On
+        delegate_to: localhost
+        community.general.redfish_command:
+          baseuri: "{{idrac_host}}"
+          username: "{{idrac_user}}"
+          password: "{{idrac_password}}"
+          category: Systems
+          command: '{{ (bios_power_state.redfish_facts.system.entries[0][1].PowerState == "Off") | ternary("PowerOn","PowerGracefulRestart") }}'
+      - pause:
+          prompt: Wait for BIOS update to complete, then press Ctrl-C then c
+      - name: Power Off
+        delegate_to: localhost
+        community.general.redfish_command:
+          baseuri: "{{idrac_host}}"
+          username: "{{idrac_user}}"
+          password: "{{idrac_password}}"
+          category: Systems
+          command: PowerGracefulShutdown
+
+
+    - when: "desired_cpld_version != current_cpld_version"
+      block:
+      - name: Upgrade CPLD
+        dellemc.openmanage.redfish_firmware:
+          baseuri: "{{idrac_host}}"
+          username: "{{idrac_user}}"
+          password: "{{idrac_password}}"
+          image_uri: "./updates/CPLD_{{desired_clpd_version}}.EXE"
+        delegate_to: localhost
+      - name: Power State (CPLD)
+        delegate_to: localhost
+        community.general.redfish_info:
+          baseuri: "{{idrac_host}}"
+          username: "{{idrac_user}}"
+          password: "{{idrac_password}}"
+          category: Systems
+          command: GetSystemInventory
+        register: cpld_power_state
+      - name: Power On (CPLD)
+        delegate_to: localhost
+        community.general.redfish_command:
+          baseuri: "{{idrac_host}}"
+          username: "{{idrac_user}}"
+          password: "{{idrac_password}}"
+          category: Systems
+          command: '{{ (cpld_power_state.redfish_facts.system.entries[0][1].PowerState == "Off") | ternary("PowerOn","PowerGracefulRestart") }}'
+      - pause:
+          prompt: Wait for CPLD update to complete, then press Ctrl-C then c
+      - name: Power Off (CPLD)
+        delegate_to: localhost
+        community.general.redfish_command:
+          baseuri: "{{idrac_host}}"
+          username: "{{idrac_user}}"
+          password: "{{idrac_password}}"
+          category: Systems
+          command: PowerGracefulShutdown
+
+    - when: "desired_idrac_version != current_idrac_version"
+      block:
+      - name: Upgrade iDRAC
+        dellemc.openmanage.redfish_firmware:
+          baseuri: "{{idrac_host}}"
+          username: "{{idrac_user}}"
+          password: "{{idrac_password}}"
+          image_uri: "./updates/iDRAC_{{desired_idrac_version}}.EXE"
+        delegate_to: localhost
+      - name: Waiting for iDRAC to go down for upgrade
+        wait_for:
+          port: 22
+          host: "{{idrac_host}}"
+          state: stopped
+          timeout: 600
+        delegate_to: localhost
+      - name: Waiting for iDRAC to come back after upgrade
+        wait_for:
+          port: 22
+          host: "{{idrac_host}}"
+          state: started
+          timeout: 600
+        delegate_to: localhost
+

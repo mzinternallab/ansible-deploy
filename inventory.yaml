@@ -1,0 +1,69 @@
+all:
+  vars:
+  #  rke2_role: server
+  #  ansible_ssh_user: "doesadm"
+    ansible_ssh_common_args: -oProxyJump=dmzv3login01.ornl.gov
+    ansible_python_interpreter: "/usr/libexec/platform-python3.6"
+    dcams_sysid: EI_PHYSICAL
+    dcams_default_shell: "/bin/bash"
+    ldap_keys: yes
+    #ansible_ssh_pass: "{{ lookup('hashi_vault', 'secret=secret/data/doesadm:password', ca_cert=lookup('env','VAULT_CACERT'))}}"
+    #idrac_user: "vfx"
+    #idrac_password: "{{ lookup('hashi_vault', 'secret=secret/data/vfx:password', ca_cert=lookup('env','VAULT_CACERT'))}}"
+    #desired_bios_version: "2.15.1"
+    #desired_cpld_version: "1.1.4"
+    #desired_idrac_version: "5.10.30.00"
+    #rhel8_install_base_url: "https://rhn6.ornl.gov/pulp/content/Oak_Ridge_National_Lab/Library/content/dist/rhel8/8.5/x86_64/baseos/kickstart"
+    install_rke2_version: "v1.27.9+rke2r1"
+    rke2_version_components: "{{rke2_version.split('+')[0].strip('v').split('.')}}"
+    rke2_repo_version_slug: "{{rke2_version_components[0]}}-{{rke2_version_components[1]}}"
+    ntp_servers:
+      - dmz-ntp.ornl.gov
+      - dmz-ntp-alt.ornl.gov
+    ntp_peers:
+      - eaglei-dev01.ornl.gov
+      - eaglei-dev02.ornl.gov
+      - eaglei-dev03.ornl.gov
+
+  hosts:
+    eaglei-dev01.ornl.gov:
+      network:
+        external:
+          ip: 160.91.92.10
+          netmask: 24
+          gateway: 160.91.92.1
+    eaglei-dev02.ornl.gov:
+      network:
+        external:
+          ip: 160.91.92.11
+          netmask: 24
+          gateway: 160.91.92.1
+    eaglei-dev03.ornl.gov:
+      network:
+        external:
+          ip: 160.91.92.12
+          netmask: 24
+          gateway: 160.91.92.1
+
+rke2_servers:
+  hosts:
+    eaglei-dev01.ornl.gov: {}
+    eaglei-dev02.ornl.gov: {}
+
+rke2_agents:
+  hosts:
+    eaglei-dev03.ornl.gov: {}
+
+rke2_cluster:
+  children:
+    rke2_agents: {}
+    rke2_servers: {}
+
+uses_root_pw:
+  hosts:
+    eaglei-dev01.ornl.gov:
+    eaglei-dev02.ornl.gov:
+    eaglei-dev03.ornl.gov:
+  vars:
+    ansible_ssh_user: root
+    ansible_ssh_pass: "XXXXXXXXXXXXXXXXX"

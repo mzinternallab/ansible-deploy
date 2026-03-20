@@ -1,0 +1,14 @@
+{% set rke2_maj_version_segments = rke2_version.split('+')[0].strip('v').split('.') %}
+[rancher-rke2-common-latest]
+name=Rancher RKE2 Common Latest
+baseurl=https://rpm.rancher.io/rke2/latest/common/centos/8/noarch
+enabled=1
+gpgcheck=1
+gpgkey=https://rpm.rancher.io/public.key
+
+[rancher-rke2-{{rke2_maj_version_segments[0]}}-{{rke2_maj_version_segments[1]}}-latest]
+name=Rancher RKE2 {{rke2_maj_version_segments[0]}}.{{rke2_maj_version_segments[1]}} Latest
+baseurl=https://rpm.rancher.io/rke2/latest/{{rke2_maj_version_segments[0]}}.{{rke2_maj_version_segments[1]}}/centos/8/x86_64
+enabled=1
+gpgcheck=1
+gpgkey=https://rpm.rancher.io/public.key

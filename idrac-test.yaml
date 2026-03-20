@@ -1,0 +1,19 @@
+- hosts: all
+  gather_facts: no
+  tasks:
+    - community.general.idrac_redfish_info:
+        baseuri: "{{idrac_host}}"
+        username: "{{idrac_user}}"
+        password: "{{idrac_password}}"
+        category: Manager
+        command: GetManagerAttributes
+      delegate_to: localhost
+      register: idrac_info
+    - set_fact:
+        idrac_version: "{{ (idrac_info.redfish_facts.entries | selectattr('Id', 'defined') | selectattr('Id', 'equalto', 'iDRACAttributes') | list | first)['Attributes']['Info.1.Version'] }}"
+    - dellemc.openmanage.redfish_firmware:
+        baseuri: "{{idrac_host}}"
+        username: "{{idrac_user}}"
+        password: "{{idrac_password}}"
+        image_uri: "./updates/BIOS_N63PX_WN64_2.10.2_01.EXE"
+    - delegate_to: localhost

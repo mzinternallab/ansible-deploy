@@ -1,0 +1,214 @@
+---
+- hosts: bootstrap_targets
+  gather_facts: false
+  tasks:
+  - name: Gather local facts
+    delegate_to: localhost
+    delegate_facts: yes
+    setup:
+    run_once: yes
+  - name: Install
+    tags: os_install
+    block:
+  #  --- PREP ---
+    - name: Create local tempdir
+      delegate_to: localhost
+      tempfile:
+        state: directory
+      register: local_tmpdir
+      run_once: true
+    - name: Download kernel and initrd from satellite
+      delegate_to: localhost
+      run_once: true
+      get_url: 
+        url: "{{item.src}}"
+        dest: "{{item.dest}}"
+      loop:
+        - src: "{{rhel8_install_base_url}}/images/pxeboot/vmlinuz"
+          dest: "{{local_tmpdir.path}}/vmlinuz"
+        - src: "{{rhel8_install_base_url}}/images/pxeboot/initrd.img"
+          dest: "{{local_tmpdir.path}}/initrd.img"
+      loop_control:
+        label: "{{item.src}}"
+    - name: Make node dirs
+      delegate_to: localhost
+      file:
+        state: directory
+        path: "{{item}}"
+      loop:
+        - "{{local_tmpdir.path}}/{{inventory_hostname}}"
+        - "{{local_tmpdir.path}}/{{inventory_hostname}}/usb"
+        - "{{local_tmpdir.path}}/{{inventory_hostname}}/usb/EFI"
+        - "{{local_tmpdir.path}}/{{inventory_hostname}}/usb/EFI/BOOT"
+    - name: Populate virtual USB
+      delegate_to: localhost
+      copy: 
+        remote_src: yes
+        src: "{{item.src}}"
+        dest: "{{item.dest}}"
+      loop:
+        - src: bootstrap/BOOTX64.EFI
+          dest: "{{local_tmpdir.path}}/{{inventory_hostname}}/usb/EFI/BOOT/BOOTX64.EFI"
+        - src: bootstrap/grubx64.efi
+          dest: "{{local_tmpdir.path}}/{{inventory_hostname}}/usb/EFI/BOOT/grubx64.efi"
+        - src: "{{local_tmpdir.path}}/vmlinuz"
+          dest: "{{local_tmpdir.path}}/{{inventory_hostname}}/usb/vmlinuz"
+        - src: "{{local_tmpdir.path}}/initrd.img"
+          dest: "{{local_tmpdir.path}}/{{inventory_hostname}}/usb/initrd.img"
+      loop_control: 
+        label: "{{item.src}}"
+    - name: Template kickstart config
+      delegate_to: localhost
+      template:
+        src: bootstrap/ks.cfg.j2
+        dest: "{{local_tmpdir.path}}/{{inventory_hostname}}/usb/ks.cfg"
+    - name: Template grub config
+      delegate_to: localhost
+      template:
+        src: bootstrap/grub.cfg.j2
+        dest: "{{local_tmpdir.path}}/{{inventory_hostname}}/usb/EFI/BOOT/grub.cfg"
+    - name: Generate USB image
+      delegate_to: localhost
+      shell:
+        executable: /bin/bash
+        chdir: "{{local_tmpdir.path}}/{{inventory_hostname}}"
+        cmd: "{{playbook_dir}}/bootstrap/make-usb-image.sh usb.img usb"
+    - name: Start temporary http server
+      delegate_to: localhost
+      run_once: yes
+      shell:
+        executable: /bin/bash
+        cmd: |
+          nohup >/dev/null 2>/dev/null http-server -s -p 28080 &
+          http_pid=$!
+          disown
+          echo $http_pid > {{local_tmpdir.path}}/httpd.pid
+        chdir: "{{local_tmpdir.path}}"
+      register: http_server
+  
+  #  --- END PREP ---
+    - name: Mount virtual USB
+      delegate_to: localhost
+      community.general.redfish_command:
+        baseuri: "{{idrac_host}}"
+        username: "{{idrac_user}}"
+        password: "{{idrac_password}}"
+        category: Manager
+        command: VirtualMediaInsert
+        virtual_media: 
+          inserted: yes
+          image_url: "http://{{hostvars['localhost']['ansible_fqdn']}}:28080/{{inventory_hostname}}/usb.img"
+          media_types:
+          - USBStick
+    - name: Select virtual USB for next boot
+      delegate_to: localhost
+      community.general.idrac_redfish_config:
+        baseuri: "{{idrac_host}}"
+        username: "{{idrac_user}}"
+        password: "{{idrac_password}}"
+        category: Manager
+        command: SetManagerAttributes
+        resource_id: iDRAC.Embedded.1
+        manager_attributes:
+          ServerBoot.1.BootOnce: "Enabled"
+          ServerBoot.1.FirstBootDevice: vFDD
+    - name: Get current power state
+      delegate_to: localhost
+      community.general.redfish_info:
+        baseuri: "{{idrac_host}}"
+        username: "{{idrac_user}}"
+        password: "{{idrac_password}}"
+        category: Systems
+        command: GetSystemInventory 
+      register: idrac_sysinv
+    - name: "(re)start for install"
+      delegate_to: localhost
+      community.general.redfish_command:
+        baseuri: "{{idrac_host}}"
+        username: "{{idrac_user}}"
+        password: "{{idrac_password}}"
+        category: Systems
+        command: '{{ (idrac_sysinv.redfish_facts.system.entries[0][1].PowerState == "Off") | ternary("PowerOn","PowerForceRestart") }}'
+    - name: Wait for system to boot
+      delegate_to: localhost
+      pause:
+        minutes: 10
+    - name: Check if installation is done
+      delegate_to: localhost
+      community.general.redfish_info:
+        baseuri: "{{idrac_host}}"
+        username: "{{idrac_user}}"
+        password: "{{idrac_password}}"
+        category: Systems
+        command: GetSystemInventory 
+      register: idrac_sysinv_2
+      until: idrac_sysinv_2.redfish_facts.system.entries[0][1].PowerState == "Off"
+      delay: 60
+      retries: 30
+    - name: Remove virtual USB
+      delegate_to: localhost
+      community.general.redfish_command:
+        baseuri: "{{idrac_host}}"
+        username: "{{idrac_user}}"
+        password: "{{idrac_password}}"
+        category: Manager
+        command: VirtualMediaEject
+        virtual_media: 
+          inserted: no
+          image_url: "http://{{hostvars['localhost']['ansible_fqdn']}}:28080/{{inventory_hostname}}/usb.img"
+          media_types:
+          - USBStick
+  
+  #  --- CLEANUP ---
+    - name: Stop temporary http server
+      run_once: yes
+      delegate_to: localhost
+      shell:
+        executable: /bin/bash
+        cmd: kill $(cat {{local_tmpdir.path}}/httpd.pid)
+    - name: Cleanup local tempdir
+      delegate_to: localhost
+      run_once: true
+      file:
+        path: "{{local_tmpdir.path}}"
+        state: absent
+  
+#  ---- POSTINSTALL ----
+  - name: Post-Install
+    tags: post_install
+    block:
+    - name: "Power on"
+      delegate_to: localhost
+      community.general.redfish_command:
+        baseuri: "{{idrac_host}}"
+        username: "{{idrac_user}}"
+        password: "{{idrac_password}}"
+        category: Systems
+        command: 'PowerOn'
+    
+    - name: Remove old ssh known entries
+      command: ssh-keygen -R {{inventory_hostname}}
+      delegate_to: localhost
+    
+    - name: "Wait for boot"
+      pause:
+        minutes: 7
+
+    - name: trust new SSH key
+      shell: |
+        ssh dmzv3login01.ornl.gov ssh-keyscan -H {{inventory_hostname}} >> ~/.ssh/known_hosts
+      delegate_to: localhost
+
+    - name: Gather Facts
+      setup:
+
+    - name: Install rhn6 consumer rpm
+      yum: 
+        name: https://rhn6.ornl.gov/pub/katello-ca-consumer-latest.noarch.rpm
+        state: present
+        disable_gpg_check: yes
+
+    - name: register with rhn6
+      redhat_subscription:
+        org_id: Oak_Ridge_National_Lab
+        activationkey: rhel8-server-eagle-i

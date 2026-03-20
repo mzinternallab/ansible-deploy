@@ -1,0 +1,158 @@
+# - name: Configure iDRAC
+#   hosts: all
+#   gather_facts: false
+#   tasks:
+#   - delegate_to: localhost
+    # tags: idrac_emails
+    # block:
+    #   - name: Configure iDRAC email alerts
+    #     community.general.idrac_redfish_config:
+    #       baseuri: "{{idrac_host}}"
+    #       username: "{{idrac_user}}"
+    #       password: "{{idrac_password}}"
+    #       category: Manager
+    #       command: SetManagerAttributes
+    #       resource_id: iDRAC.Embedded.1
+    #       manager_attributes:
+    #         RemoteHosts.1.SMTPServerIPAddress: smtp.ornl.gov
+    #         RemoteHosts.1.SMTPPort: 25
+    #         RemoteHosts.1.ConnectionEncryption: "STARTTLS"
+    #         RemoteHosts.1.SMTPAuthentication: "Disabled"
+    #         # RemoteHosts.1.SMTPUserName: ""
+    #         # RemoteHosts.1.SMTPPassword: ""
+    #         RemoteHosts.1.SenderEmail: "idrac@{{idrac_host.split('.')[0]}}.ornl.gov"
+    #         RemoteHosts.1.MessageSubjectPrefix: "[iDRAC]"
+    #         EmailAlert.1.Enable: "Enabled"
+    #         EmailAlert.1.Address: "rossaj@ornl.gov"
+    #         EmailAlert.2.Enable: "Enabled"
+    #         EmailAlert.2.Address: "zubkodj@ornl.gov"
+    #         EmailAlert.3.Enable: "Enabled"
+    #         EmailAlert.3.Address: "does-support@ornl.gov"
+    #         EmailAlert.4.Enable: "Disabled"
+
+# Commented out because DCAMS role is empty.
+# This is something we can request from Enterprise admins
+#- hosts: all
+#  tags: dcams
+#  roles:
+#    - role: dcams
+#      tags: dcams
+
+
+- hosts: all
+  tags: configure
+  gather_facts: no
+  tasks:
+    - package_facts: {}
+    - rpm_key:
+        state: present
+        key: "https://rhn6.ornl.gov/pub/ORNL-RPM-GPG-KEY"
+    - file:
+        path: "{{item}}"
+        state: directory
+      loop:
+        - "/etc/wscfengine"
+        - "/etc/wscfengine/optout"
+        - "/etc/wscfengine/optin"
+    - file:
+        path: "/etc/wscfengine/optout/network_time"
+        state: touch
+    - when: "'wscfengine' not in ansible_facts.packages"
+      tags: wscfengine
+      block:
+        - name: Create temporary directory
+          tempfile:
+            state: directory
+          register: cfe_tempdir
+        - name: Copy RPMs to remote host
+          copy:
+            src: "rpms/"
+            dest: "{{cfe_tempdir.path}}/"
+        - name: Install wscfengine form rpm
+          yum:
+            state: present
+            name:
+              - "{{cfe_tempdir.path}}/lmdb-0.9.22-2.el8.x86_64.rpm"
+              - "{{cfe_tempdir.path}}/lmdb-libs-0.9.22-2.el8.x86_64.rpm"
+              - "{{cfe_tempdir.path}}/wscfengine-3.12.3-1.ORNL.rhel.el7.x86_64.rpm"
+        - name: Clean up tmpdir
+          file:
+            state: absent
+            path: "{{cfe_tempdir.path}}"
+        - name: inagural cfengine run
+          command: "/var/wscfengine3/bin/cf-agent"
+
+    - name: Configure chrony
+      template:
+        src: templates/chrony.conf.j2
+        dest: "/etc/chrony.conf"
+      register: chrony_conf
+    - name: reload/restart chrony
+      systemd:
+        name: chronyd
+        state: "{{chrony_conf.changed | ternary('restarted','started')}}"
+        enabled: yes
+
+- name: Server play
+  hosts: rke2_servers
+  any_errors_fatal: true
+  become: true
+  roles:
+    - role: rke2_server
+  serial: 1
+
+- name: Agent play
+  hosts: rke2_agents
+  any_errors_fatal: true
+  become: true
+  roles:
+    - role: rke2_agent
+  serial: 3
+
+- name: Cluster manifest play
+  hosts: rke2_servers
+  any_errors_fatal: true
+  become: true
+  roles:
+    - role: cluster_manifest
+
+#    - name: 'multipath tools installed'
+#      package:
+#        name: device-mapper-multipath
+#        state: present
+#    - name: 'check if multipath config exists'
+#      stat:
+#        path: "/etc/multipath.conf"
+#        get_attributes: no
+#        get_checksum: no
+#        get_mime: no
+#      register: stat_multipath_conf
+#    - name: 'generate multipath config'
+#      command: '/sbin/mpathconf --enable'
+#      when: 'not stat_multipath_conf.stat.exists'
+#    - name: 'start/enable multipathd'
+#      service:
+#        name: multipathd
+#        enabled: yes
+#        state: started
+
+
+#    - name: 'create rke2 repo file'
+#      template:
+#        src: 'templates/rke2.repo.j2'
+#        dest: '/etc/yum.repos.d/rancher-rke2.repo'
+#      register: rke2_repo_file
+#    - name: "Clear yum cache"
+#      when: rke2_repo_file.changed
+#      command: dnf clean expire-cache
+#      args:
+#        warn: false
+#    - name: "Install RKE"
+#      dnf:
+#        name: "rke2-{{ rke2_role | default('server') }}-{{rke2_version.strip('v') | replace('+','~')}}-0.el8"
+#        state: present
+#    - name: 'logwatch for rook-ceph'
+#      copy:
+#        src: logrotate-rook.conf
+#        dest: "/etc/logrotate.d/rook-ceph"
+

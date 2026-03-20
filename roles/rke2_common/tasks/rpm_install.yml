@@ -1,0 +1,59 @@
+---
+
+# Does the Rancher RKE2 Common repo exist already
+- name: Check to see if rke2-common.repo exists
+  ansible.builtin.stat:
+    path: '/etc/yum.repos.d/rke2-common.repo'
+  register: stat_rke2_common_repo
+
+# Add RKE2 Common repo if it doesn't exist
+- name: Add the rke2-common repo RHEL/CentOS/Rocky
+  ansible.builtin.yum_repository:
+    name: "{{ rke2_common_yum_repo.name }}"
+    description: "{{ rke2_common_yum_repo.description }}"
+    baseurl: "{{ rke2_common_yum_repo.baseurl }}"
+    gpgcheck: "{{ rke2_common_yum_repo.gpgcheck }}"
+    gpgkey: "{{ rke2_common_yum_repo.gpgkey }}"
+    enabled: "{{ rke2_common_yum_repo.enabled }}"
+  when:
+    - not stat_rke2_common_repo.stat.exists
+    - ansible_facts['os_family'] == "RedHat" or ansible_facts['os_family'] == "Rocky"
+    - ansible_facts['distribution_major_version'] == "7" or ansible_facts['distribution_major_version'] == "8" or ansible_facts['distribution_major_version'] == "9"
+
+# Does the Rancher RKE2 versioned repo exist already
+- name: Check to see if rke2 versioned repo exists
+  ansible.builtin.stat:
+    path: '/etc/yum.repos.d/rke2-v{{ rke2_version_majmin }}.repo'
+  register: stat_rke2_versioned_repo
+
+# Add RKE2 versioned repo if it doesn't exist
+- name: Add the rke2 versioned repo CentOS/RHEL/Rocky
+  ansible.builtin.yum_repository:
+    name: "{{ rke2_versioned_yum_repo.name }}"
+    description: "{{ rke2_versioned_yum_repo.description }}"
+    baseurl: "{{ rke2_versioned_yum_repo.baseurl }}"
+    gpgcheck: "{{ rke2_versioned_yum_repo.gpgcheck }}"
+    gpgkey: "{{ rke2_versioned_yum_repo.gpgkey }}"
+    enabled: "{{ rke2_versioned_yum_repo.enabled }}"
+  when:
+    - not stat_rke2_common_repo.stat.exists
+    - ansible_facts['os_family'] == "RedHat" or ansible_facts['os_family'] == "Rocky"
+    - ansible_facts['distribution_major_version'] == "7" or ansible_facts['distribution_major_version'] == "8" or ansible_facts['distribution_major_version'] == "9"
+
+- name: YUM-Based | Install rke2-server
+  ansible.builtin.yum:
+    name: "rke2-server-{{ rke2_version_rpm }}"
+    state: latest  # noqa package-latest
+  when:
+    - ansible_facts['os_family'] == 'RedHat' or ansible_facts['os_family'] == 'Rocky'
+    - not rke2_binary_tarball_check.stat.exists
+    - inventory_hostname in groups['rke2_servers']
+
+- name: YUM-Based | Install rke2-agent
+  ansible.builtin.yum:
+    name: "rke2-agent-{{ rke2_version_rpm }}"
+    state: latest  # noqa package-latest
+  when:
+    - ansible_facts['os_family'] == 'RedHat' or ansible_facts['os_family'] == 'Rocky'
+    - not rke2_binary_tarball_check.stat.exists
+    - inventory_hostname in groups.get('rke2_agents', [])
