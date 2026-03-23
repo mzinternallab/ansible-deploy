@@ -1,5 +1,4 @@
 set default="1"
-
 function load_video {
   insmod efi_gop
   insmod efi_uga
@@ -7,24 +6,21 @@ function load_video {
   insmod video_cirrus
   insmod all_video
 }
-
 load_video
 set gfxpayload=keep
 insmod gzio
 insmod part_gpt
 insmod ext2
-
 set timeout=60
 ### END /etc/grub.d/00_header ###
-
 search --no-floppy --set=root -l 'OEMDRV'
-
 ### BEGIN /etc/grub.d/10_linux ###
-menuentry 'Install Red Hat Enterprise Linux 8.5 from rhn6.ornl.gov' --class fedora --class gnu-linux --class gnu --class os {
-	linuxefi /vmlinuz inst.stage2=https://rhn6.ornl.gov/pulp/content/Oak_Ridge_National_Lab/Library/content/dist/rhel8/8.5/x86_64/baseos/kickstart/ \
-        bond=bond0:eno3,eno4:mode=802.3ad \
-        vlan=bond0.2052:bond0 \
-	ip={{network['internal']['ip']}}::{{network['internal']['gateway']}}:{{network['internal']['netmask']}}:{{inventory_hostname}}:bond0.2052:none \
+menuentry 'Install Red Hat Enterprise Linux 9.4 from rhn6.ornl.gov' --class fedora --class gnu-linux --class gnu --class os {
+        linuxefi /vmlinuz inst.stage2=https://rhn6.ornl.gov/pulp/content/Oak_Ridge_National_Lab/Library/content/dist/rhel9/9.4/x86_64/baseos/kickstart/ \
+        inst.ks=http://{{hostvars['localhost']['ansible_fqdn']}}:28080/{{inventory_hostname}}/ks.cfg \
+        bond=bond0:ens3f0np0,ens6f1np1:mode=802.3ad \
+        vlan=bond0.2042:bond0 \
+        ip={{network['vlan2042']['ip']}}::{{network['vlan2042']['gateway']}}:255.255.255.0:{{inventory_hostname}}:bond0.2042:none \
         nameserver=10.149.2.36 nameserver=10.149.2.37
-	initrdefi /initrd.img
+        initrdefi /initrd.img
 }

@@ -24,9 +24,9 @@
         url: "{{item.src}}"
         dest: "{{item.dest}}"
       loop:
-        - src: "{{rhel8_install_base_url}}/images/pxeboot/vmlinuz"
+        - src: "{{rhel9_install_base_url}}/images/pxeboot/vmlinuz"
           dest: "{{local_tmpdir.path}}/vmlinuz"
-        - src: "{{rhel8_install_base_url}}/images/pxeboot/initrd.img"
+        - src: "{{rhel9_install_base_url}}/images/pxeboot/initrd.img"
           dest: "{{local_tmpdir.path}}/initrd.img"
       loop_control:
         label: "{{item.src}}"
@@ -203,7 +203,7 @@
       setup:
 
     - name: Install rhn6 consumer rpm
-      yum: 
+      dnf: 
         name: https://rhn6.ornl.gov/pub/katello-ca-consumer-latest.noarch.rpm
         state: present
         disable_gpg_check: yes
@@ -211,4 +211,4 @@
     - name: register with rhn6
       redhat_subscription:
         org_id: Oak_Ridge_National_Lab
-        activationkey: rhel8-server-eagle-i
+        activationkey: rhel9-server-eagle-i

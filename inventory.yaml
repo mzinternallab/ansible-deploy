@@ -1,69 +1,124 @@
 all:
   vars:
-  #  rke2_role: server
-  #  ansible_ssh_user: "doesadm"
     ansible_ssh_common_args: -oProxyJump=dmzv3login01.ornl.gov
-    ansible_python_interpreter: "/usr/libexec/platform-python3.6"
+    ansible_python_interpreter: "/usr/bin/python3"
     dcams_sysid: EI_PHYSICAL
     dcams_default_shell: "/bin/bash"
     ldap_keys: yes
-    #ansible_ssh_pass: "{{ lookup('hashi_vault', 'secret=secret/data/doesadm:password', ca_cert=lookup('env','VAULT_CACERT'))}}"
-    #idrac_user: "vfx"
-    #idrac_password: "{{ lookup('hashi_vault', 'secret=secret/data/vfx:password', ca_cert=lookup('env','VAULT_CACERT'))}}"
-    #desired_bios_version: "2.15.1"
-    #desired_cpld_version: "1.1.4"
-    #desired_idrac_version: "5.10.30.00"
-    #rhel8_install_base_url: "https://rhn6.ornl.gov/pulp/content/Oak_Ridge_National_Lab/Library/content/dist/rhel8/8.5/x86_64/baseos/kickstart"
-    install_rke2_version: "v1.27.9+rke2r1"
+    ansible_ssh_user: "doesadm"
+
+    idrac_user: "root"
+    idrac_password: "{{ lookup('hashi_vault', 'secret=secret/data/idrac:password', ca_cert=lookup('env','VAULT_CACERT'))}}"
+
+    desired_bios_version: "2.8.2"
+    desired_idrac_version: "7.20.80.50"
+
+    rhel9_install_base_url: "https://rhn6.ornl.gov/pulp/content/Oak_Ridge_National_Lab/Library/content/dist/rhel9/9.4/x86_64/baseos/kickstart"
+
+    install_rke2_version: "v1.32.12+rke2r1"
     rke2_version_components: "{{rke2_version.split('+')[0].strip('v').split('.')}}"
     rke2_repo_version_slug: "{{rke2_version_components[0]}}-{{rke2_version_components[1]}}"
+
     ntp_servers:
       - dmz-ntp.ornl.gov
       - dmz-ntp-alt.ornl.gov
+
     ntp_peers:
-      - eaglei-dev01.ornl.gov
-      - eaglei-dev02.ornl.gov
-      - eaglei-dev03.ornl.gov
+      - eaglei-wn-test-04.ornl.gov
+      # - eaglei-wn-prod-04.ornl.gov
+      # - eaglei-wn-prod-05.ornl.gov
 
   hosts:
-    eaglei-dev01.ornl.gov:
+    eaglei-wn-test-04.ornl.gov:
+      idrac_host: "10.240.128.99"
       network:
-        external:
-          ip: 160.91.92.10
-          netmask: 24
+        vlan2042:
+          ip: 160.91.92.38
           gateway: 160.91.92.1
-    eaglei-dev02.ornl.gov:
-      network:
-        external:
-          ip: 160.91.92.11
-          netmask: 24
-          gateway: 160.91.92.1
-    eaglei-dev03.ornl.gov:
-      network:
-        external:
-          ip: 160.91.92.12
-          netmask: 24
-          gateway: 160.91.92.1
+        vlan2055:
+          ip: 10.231.104.22
+          gateway: 10.231.104.1
+        vlan2056:
+          ip: 10.231.112.25
+          gateway: 10.231.112.1
+        vlan2057:
+          ip: 10.231.120.28
+          gateway: 10.231.120.1
 
-rke2_servers:
-  hosts:
-    eaglei-dev01.ornl.gov: {}
-    eaglei-dev02.ornl.gov: {}
+    # eaglei-wn-prod-04.ornl.gov:
+    #   idrac_host: "10.240.128.112"
+    #   network:
+    #     vlan2042:
+    #       ip: 160.91.92.55
+    #       gateway: 160.91.92.1
+    #     vlan2055:
+    #       ip: 10.231.100.24
+    #       gateway: 10.231.104.1
+    #     vlan2056:
+    #       ip: 10.231.108.26
+    #       gateway: 10.231.112.1
+    #     vlan2057:
+    #       ip: 10.231.116.32
+    #       gateway: 10.231.120.1
 
+    # eaglei-wn-prod-05.ornl.gov:
+    #   idrac_host: "10.240.128.98"
+    #   network:
+    #     vlan2042:
+    #       ip: 160.91.92.37
+    #       gateway: 160.91.92.1
+    #     vlan2055:
+    #       ip: 10.231.100.23
+    #       gateway: 10.231.104.1
+    #     vlan2056:
+    #       ip: 10.231.108.30
+    #       gateway: 10.231.112.1
+    #     vlan2057:
+    #       ip: 10.231.116.33
+    #       gateway: 10.231.120.1
+
+# RKE2 roles — new nodes are worker agents
 rke2_agents:
   hosts:
-    eaglei-dev03.ornl.gov: {}
+    eaglei-wn-test-04.ornl.gov: {}
+    # eaglei-wn-prod-04.ornl.gov: {}
+    # eaglei-wn-prod-05.ornl.gov: {}
 
 rke2_cluster:
   children:
     rke2_agents: {}
-    rke2_servers: {}
 
+# Bootstrap targets — servers that will be reinstalled when bootstrap.yaml is run
+# WARNING: any host in this group will have its OS wiped on next bootstrap run
+bootstrap_targets:
+  hosts:
+    eaglei-wn-test-04.ornl.gov: {}
+    # eaglei-wn-prod-04.ornl.gov: {}
+    # eaglei-wn-prod-05.ornl.gov: {}
+
+# Hardware spec — all 3 new nodes are R760, same spec
+hwspec_r760:
+  hosts:
+    eaglei-wn-test-04.ornl.gov: {}
+    # eaglei-wn-prod-04.ornl.gov: {}
+    # eaglei-wn-prod-05.ornl.gov: {}
+
+# Use root password for initial connection (before doesadm is configured)
 uses_root_pw:
   hosts:
-    eaglei-dev01.ornl.gov:
-    eaglei-dev02.ornl.gov:
-    eaglei-dev03.ornl.gov:
+    eaglei-wn-test-04.ornl.gov: {}
+    # eaglei-wn-prod-04.ornl.gov: {}
+    # eaglei-wn-prod-05.ornl.gov: {}
   vars:
     ansible_ssh_user: root
-    ansible_ssh_pass: "XXXXXXXXXXXXXXXXX"
+    ansible_ssh_pass: "{{ lookup('hashi_vault', 'secret=secret/data/doesadm:password', ca_cert=lookup('env','VAULT_CACERT'))}}"
+
+# Environment separation
+test_nodes:
+  hosts:
+    eaglei-wn-test-04.ornl.gov: {}
+
+# prod_nodes:
+#   hosts:
+#     eaglei-wn-prod-04.ornl.gov: {}
+#     eaglei-wn-prod-05.ornl.gov: {}

@@ -1,63 +1,59 @@
-# Kickstart for eagle-i
+# Kickstart for eagle-i RHEL 9.4
+# Generated from bootstrap/ks.cfg.j2
+# Replaces: RHEL 8.5 kickstart
+# Changes: RHEL 9.4 URLs, PCR IDs matched to existing nodes,
+#          datadrive.key + md0 LUKS implemented, rt_tables for all 4 VLANs,
+#          NM connection files deployed from Ansible repo
+
 cmdline
 
-# required settings
+# Required settings
 lang en_US.UTF-8
 keyboard --xlayouts='us'
 timezone Etc/UTC --utc --ntpservers=dmz-ntp.ornl.gov,dmz-ntp-alt.ornl.gov
-# GIST initial password
+
+# GIST initial root password (same as existing nodes)
 rootpw --iscrypted $6$fjfExo/u9rTm4mbX$SxX9L/3EO94RdfsgYvKZVQqZqnsnMiVQdMp0jEfEBJrLU5UEXEkoCBseKgRRDuFuISiKCUYrjWuQ6vM64e2Wb0
 
+# Install source
+url --url=https://rhn6.ornl.gov/pulp/content/Oak_Ridge_National_Lab/Library/content/dist/rhel9/9.4/x86_64/baseos/kickstart
+repo --name=AppStream --baseurl=https://rhn6.ornl.gov/pulp/content/Oak_Ridge_National_Lab/Library/content/dist/rhel9/9.4/x86_64/appstream/kickstart
 
-# erase any existing partitions on local drives
-#ignoredisk --only-use={{disk_path_ata}},nvme0n1,nvme1n1,nvme2n1,nvme3n1,nvme4n1
-ignoredisk --only-use=disk/by-path/pci-0000:01:00.0-nvme-1,nvme0n1,nvme1n1,nvme2n1
-#clearpart --drives=disk/by-path/pci-0000:18:00.0-sas-phy6-lun-0,{{disk_path_ata}},nvme0n1,nvme1n1,nvme2n1,nvme3n1,nvme4n1 --all
+# Disk layout
+# OS drive:   pci-0000:01:00.0-nvme-1  (nvme2n1)
+# RAID data:  pci-0000:ca:00.0-nvme-1  (nvme0n1)
+#             pci-0000:cb:00.0-nvme-1  (nvme1n1)
+ignoredisk --only-use=disk/by-path/pci-0000:01:00.0-nvme-1,disk/by-path/pci-0000:ca:00.0-nvme-1,disk/by-path/pci-0000:cb:00.0-nvme-1
 clearpart --drives=disk/by-path/pci-0000:01:00.0-nvme-1,disk/by-path/pci-0000:ca:00.0-nvme-1,disk/by-path/pci-0000:cb:00.0-nvme-1 --all
-reqpart
-#part /boot --ondisk={{disk_path_ata}} --size=1024 --fstype=xfs
-part /boot --ondisk=disk/by-path/pci-0000:01:00.0-nvme-1 --size=1024 --fstype=xfs
-part /boot/efi --ondisk=disk/by-path/pci-0000:01:00.0-nvme-1
-#part pv.1 --ondisk={{disk_path_ata}} --grow --encrypted --passphrase=INSECURE-default-CHANGEME
-part pv.1 --ondisk=disk/by-path/pci-0000:01:00.0-nvme-1 --grow --encrypted --passphrase=INSECURE-default-CHANGEME
 
-# Create partition for software raid for stand-a-lone nvme's:
+reqpart
+
+# OS drive partitions (nvme2n1)
+part /boot     --ondisk=disk/by-path/pci-0000:01:00.0-nvme-1 --size=1024 --fstype=xfs
+part /boot/efi --ondisk=disk/by-path/pci-0000:01:00.0-nvme-1 --size=500 --fstype=efi
+part pv.1      --ondisk=disk/by-path/pci-0000:01:00.0-nvme-1 --grow --encrypted \
+               --passphrase=INSECURE-default-CHANGEME
+
+# Data RAID-1 members (nvme0n1 + nvme1n1)
 part raid.nvmeA --ondisk=disk/by-path/pci-0000:ca:00.0-nvme-1 --grow
 part raid.nvmeB --ondisk=disk/by-path/pci-0000:cb:00.0-nvme-1 --grow
 raid pv.2 --device md0 --level=RAID1 raid.nvmeA raid.nvmeB
 
+# System volume group (on encrypted OS NVMe)
 volgroup systemvg pv.1
-logvol / --vgname=systemvg --name=root --size=51200
-logvol /home --vgname=systemvg --name=home --size=30720
-logvol /var --vgname=systemvg --name=var --size=22528
-logvol /var/tmp --vgname=systemvg --name=var_tmp --size=10240
-logvol /var/log/audit --vgname=systemvg --name=var_log_audit --size=512
+logvol /               --vgname=systemvg --name=root          --size=51200  --fstype=xfs
+logvol /home           --vgname=systemvg --name=home          --size=30720  --fstype=xfs
+logvol /var            --vgname=systemvg --name=var           --size=22528  --fstype=xfs
+logvol /var/tmp        --vgname=systemvg --name=var_tmp       --size=10240  --fstype=xfs
+logvol /var/log/audit  --vgname=systemvg --name=var_log_audit --size=512    --fstype=xfs
 
-
-#part pv.2 --ondisk=nvme0n1 --grow --encrypted --passphrase=INSECURE-default-CHANGEME
-#volgroup datavg pv.2
-#logvol /var/lib/rancher/rke2/agent/containerd --vgname=datavg --name=containerd --size=102400
-#logvol /var/lib/rook --vgname=datavg --name=var_lib_rook --size=20480
-
-# Create volume group and LVM from RAID-1 device created above:
+# Data volume group (on RAID-1 — LUKS applied in %post)
 volgroup datavg pv.2
-logvol /var/lib/rancher --vgname=datavg --name=rancher --size=204800
-#logvol /var/lib/rook --vgname=datavg --name=var_lib_rook --size=20480
+logvol /var/lib/rancher --vgname=datavg --name=rancher --size=204800 --fstype=xfs
 
-# MBR actually means ESP here
-bootloader --location mbr
+bootloader --location=mbr
 
-# We create both bonds here, but we don't activate both, since the rules we need can't be expressed here
-#network --device=bond0 --bondslaves=eno3,eno4 --bondopts=mode=802.3ad,downdelay=0,miimon=1,updelay=0 --noipv4 --noipv6 --no-activate --onboot=yes
-#network --device=bond1 --bondslaves=eno1,eno2 --bondopts=mode=802.3ad,downdelay=0,miimon=1,updelay=0 --noipv4 --noipv6 --no-activate --onboot=yes
-
-# These generate broken network setups, so we create them in %post
-# network --device=bond0 --vlanid=2052 --interfacename=bond0.2052 --no-activate --onboot=yes --noipv6 --ip={{network['internal']['ip']}} --netmask={{network['internal']['netmask']}} --gateway={{network['internal']['gateway']}} --nameserver=10.149.2.36,10.149.2.37
-# network --device=bond1 --vlanid=2042 --interfacename=bond1.2042 --no-activate --onboot=yes --noipv6 --ip={{network['external']['ip']}} --netmask={{network['external']['netmask']}} --gateway={{network['external']['gateway']}} --nameserver=10.149.2.36,10.149.2.37
-
-#syspurpose --role="Red Hat Enterprise Linux Server" --sla="Standard" --usage="Production"
-#url --url=https://rhn6.ornl.gov/pulp/content/Oak_Ridge_National_Lab/Library/content/dist/rhel9/9.3/x86_64/baseos/kickstart
-#repo --name=AppStream --baseurl=https://rhn6.ornl.gov/pulp/content/Oak_Ridge_National_Lab/Library/content/dist/rhel9/9.3/x86_64/appstream/kickstart
+firewall --disabled
 
 %packages
 @^minimal-environment
@@ -66,74 +62,267 @@ clevis-dracut
 clevis-luks
 clevis-systemd
 tpm2-tools
+tpm2-abrmd
+mdadm
+cryptsetup
 %end
+
 skipx
 
-# Known rancher bug
-firewall --disabled
-
+# ---- POST (chroot) ----
 %post --log=/root/ks-post.log --interpreter=/usr/bin/bash --erroronfail
 set -xe -o pipefail
 
+# Add routing tables for all 4 VLANs
 cat >> /etc/iproute2/rt_tables <<END
-100 ornl.int
-200 ornl.ext
+100 ornl.vlan2055
+200 ornl.vlan2042
+300 ornl.vlan2056
+400 ornl.vlan2057
 END
 
-# Copied from install environment
-#nmcli c delete bond0.2052
+# Deploy NetworkManager connection files
+# These are baked into the kickstart from the Ansible repo files/nm-connections/
+# Static files (no per-node variables)
+cat > /etc/NetworkManager/system-connections/bond0.nmconnection <<'NMEOF'
+[connection]
+id=bond0
+type=bond
+autoconnect-priority=-100
+autoconnect-retries=1
+interface-name=bond0
+multi-connect=1
 
-# network statements above use 'ignore' which still does link-local
-#nmcli c modify "Bond connection bond0" ipv6.method disabled
-#nmcli c modify "Bond connection bond1" ipv6.method disabled
+[ethernet]
+mtu=9000
 
-#nmcli c add \
-#        con-name "VLAN Connection bond0.2052" \
-#        autoconnect yes \
-#        save yes \
-#	type vlan \
-#	ifname bond0.2052 \
-#	dev bond0 \
-#	id 2052 \
-#	ip4 "{{network['internal']['ip']}}/{{network['internal']['netmask']}}" \
-#	gw4 "{{network['internal']['gateway']}}" \
-#	ipv4.dns 10.149.2.36,10.149.2.37 \
-#	ipv4.dns-search ornl.gov,dmz.ornl.gov \
-#        ipv4.route-table 100 \
-#        ipv4.routing-rules "priority 10001 from {{network['internal']['ip']}} table 100, priority 12001 to 10.231.92.0/24 table 100, priority 20001 from 0.0.0.0/0 table 100, priority 2002 to 10.42.0.0/16 table 254"
+[bond]
+mode=802.3ad
+miimon=100
+lacp_rate=slow
+xmit_hash_policy=layer2
 
-#nmcli c add \
-#        con-name "VLAN Connection bond1.2042" \
-#        autoconnect yes \
-#        save yes \
-#	type vlan \
-#	ifname bond1.2042 \
-#	dev bond1 \
-#	id 2042 \
-#	ip4 "{{network['external']['ip']}}/{{network['external']['netmask']}}" \
-#	gw4 "{{network['external']['gateway']}}" \
-#	ipv4.dns 10.149.2.36,10.149.2.37 \
-#	ipv4.dns-search ornl.gov,dmz.ornl.gov \
-#        ipv4.route-table 200 \
-#        ipv4.routing-rules "priority 10000 from {{network['external']['ip']}} table 200, priority 12000 to 160.91.92.0/24 table 200, priority 20000 from 0.0.0.0/0 table 200"
+[ipv4]
+method=disabled
 
-# Setup crypttab for data drive
-#DATADRIVE_LUKS_UUID=$(blkid /dev/nvme0n1p1 -o value -s UUID)
-#install -m 600 /dev/null /etc/datadrive.key
-#openssl rand -base64 48 > /etc/datadrive.key
-#cryptsetup luksChangeKey /dev/nvme0n1p1 /etc/datadrive.key --key-file <(echo -n "INSECURE-default-CHANGEME")
-#sed -ri "s#(luks-$DATADRIVE_LUKS_UUID UUID=$DATADRIVE_LUKS_UUID) none#\\1 /etc/datadrive.key#" /etc/crypttab
+[ipv6]
+addr-gen-mode=eui64
+method=disabled
 
-# Setup clevis with PCR checking off on boot drive
-ROOT_LUKS_DEVICE=$(pvs | grep systemvg | cut -f3 -d' ')
-ROOT_BACK_DEVICE=$(cryptsetup status $ROOT_LUKS_DEVICE | grep device | cut -f2 -d: | xargs)
-clevis luks bind -d $ROOT_BACK_DEVICE -k - <<<"INSECURE-default-CHANGEME" tpm2 '{"hash": "sha256", "key": "ecc"}'
+[proxy]
+NMEOF
 
-# Clean up extra boot entries
+cat > /etc/NetworkManager/system-connections/bond-slave-ens3f0np0.nmconnection <<'NMEOF'
+[connection]
+id=bond-slave-ens3f0np0
+type=ethernet
+controller=bond0
+interface-name=ens3f0np0
+master=bond0
+port-type=bond
+slave-type=bond
+
+[ethernet]
+
+[bond-port]
+NMEOF
+
+cat > /etc/NetworkManager/system-connections/bond-slave-ens6f1np1.nmconnection <<'NMEOF'
+[connection]
+id=bond-slave-ens6f1np1
+type=ethernet
+controller=bond0
+interface-name=ens6f1np1
+master=bond0
+port-type=bond
+slave-type=bond
+
+[ethernet]
+
+[bond-port]
+NMEOF
+
+# Templated VLAN files (per-node IPs injected by Jinja2)
+cat > /etc/NetworkManager/system-connections/bond0.2042.nmconnection <<NMEOF
+[connection]
+id=bond0.2042
+type=vlan
+interface-name=bond0.2042
+
+[ethernet]
+mtu=9000
+
+[vlan]
+flags=1
+id=2042
+parent=bond0
+
+[ipv4]
+address1={{ network['vlan2042']['ip'] }}/24,{{ network['vlan2042']['gateway'] }}
+dns=10.149.2.36;10.149.2.37;
+method=manual
+routing-rule1=priority 10000 from {{ network['vlan2042']['ip'] }} table 200
+routing-rule2=priority 12000 to 160.91.92.0/24 table 200
+routing-rule3=priority 20000 from 0.0.0.0/0 table 200
+
+[ipv6]
+addr-gen-mode=default
+method=auto
+
+[proxy]
+NMEOF
+
+cat > /etc/NetworkManager/system-connections/bond0.2055.nmconnection <<NMEOF
+[connection]
+id=bond0.2055
+type=vlan
+interface-name=bond0.2055
+
+[ethernet]
+mtu=9000
+
+[vlan]
+flags=1
+id=2055
+parent=bond0
+
+[ipv4]
+address1={{ network['vlan2055']['ip'] }}/22,{{ network['vlan2055']['gateway'] }}
+dns=10.149.2.36;10.149.2.37;
+method=manual
+routing-rule1=priority 10001 from {{ network['vlan2055']['ip'] }} table 100
+routing-rule2=priority 12001 to 10.231.100.0/22 table 100
+routing-rule3=priority 20001 from 0.0.0.0/0 table 100
+routing-rule4=priority 2002 to 10.42.0.0/16 table 254
+
+[ipv6]
+addr-gen-mode=default
+method=auto
+
+[proxy]
+NMEOF
+
+cat > /etc/NetworkManager/system-connections/bond0.2056.nmconnection <<NMEOF
+[connection]
+id=bond0.2056
+type=vlan
+interface-name=bond0.2056
+
+[ethernet]
+mtu=9000
+
+[vlan]
+flags=1
+id=2056
+parent=bond0
+
+[ipv4]
+address1={{ network['vlan2056']['ip'] }}/22,{{ network['vlan2056']['gateway'] }}
+dns=10.149.2.36;10.149.2.37;
+method=manual
+routing-rule1=priority 10002 from {{ network['vlan2056']['ip'] }} table 300
+routing-rule2=priority 12002 to 10.231.108.0/22 table 300
+routing-rule3=priority 20002 from 0.0.0.0/0 table 300
+routing-rule4=priority 2003 to 10.42.0.0/16 table 254
+
+[ipv6]
+addr-gen-mode=default
+method=auto
+
+[proxy]
+NMEOF
+
+cat > /etc/NetworkManager/system-connections/bond0.2057.nmconnection <<NMEOF
+[connection]
+id=bond0.2057
+type=vlan
+interface-name=bond0.2057
+
+[ethernet]
+mtu=9000
+
+[vlan]
+flags=1
+id=2057
+parent=bond0
+
+[ipv4]
+address1={{ network['vlan2057']['ip'] }}/22,{{ network['vlan2057']['gateway'] }}
+dns=10.149.2.36;10.149.2.37;
+method=manual
+routing-rule1=priority 10003 from {{ network['vlan2057']['ip'] }} table 400
+routing-rule2=priority 12003 to 10.231.116.0/22 table 400
+routing-rule3=priority 20003 from 0.0.0.0/0 table 400
+routing-rule4=priority 2004 to 10.42.0.0/16 table 254
+
+[ipv6]
+addr-gen-mode=default
+method=auto
+
+[proxy]
+NMEOF
+
+# Set correct permissions on all NM connection files
+chmod 600 /etc/NetworkManager/system-connections/*.nmconnection
+
+# Setup datadrive.key and LUKS on md0
+# md0 is currently unencrypted (just a plain RAID-1 LVM PV from kickstart partitioning)
+# We encrypt it here, generate the keyfile, and update crypttab
+
+# Generate keyfile matching existing node format (base64, 64 chars + newline)
+install -m 600 /dev/null /etc/datadrive.key
+openssl rand -base64 48 > /etc/datadrive.key
+
+# Get the current md0 UUID before we reformat it
+# NOTE: md0 at this point is a plain LVM PV (datavg) created by kickstart
+# We need to destroy it and rebuild with LUKS on top of the raw md device
+# Deactivate the datavg first
+vgchange -an datavg
+lvremove -f datavg/rancher || true
+vgremove -f datavg || true
+pvremove /dev/md0 || true
+
+# Now apply LUKS to the raw md0 device using the keyfile
+cryptsetup luksFormat /dev/md0 /etc/datadrive.key
+
+# Open the LUKS device
+DATA_LUKS_UUID=$(cryptsetup luksUUID /dev/md0)
+cryptsetup luksOpen /dev/md0 luks-${DATA_LUKS_UUID} --key-file /etc/datadrive.key
+
+# Recreate the data VG and LV on top of the LUKS device
+pvcreate /dev/mapper/luks-${DATA_LUKS_UUID}
+vgcreate datavg /dev/mapper/luks-${DATA_LUKS_UUID}
+lvcreate -L 200G -n rancher datavg
+mkfs.xfs /dev/datavg/rancher
+
+# Create mount point
+mkdir -p /var/lib/rancher
+
+# Update crypttab for md0 (keyfile unlock)
+echo "luks-${DATA_LUKS_UUID} UUID=${DATA_LUKS_UUID} /etc/datadrive.key discard" >> /etc/crypttab
+
+# Update fstab for /var/lib/rancher
+echo "/dev/mapper/datavg-rancher /var/lib/rancher xfs defaults,x-systemd.device-timeout=0 0 0" >> /etc/fstab
+
+# Add /var/crash NFS mount
+mkdir -p /var/crash
+echo "160.91.92.14:/kdump /var/crash nfs defaults 0 0" >> /etc/fstab
+
+# Save mdadm config
+mdadm --detail --scan >> /etc/mdadm.conf
+
+# Bind OS LUKS to TPM2 with PCR set matching existing nodes
+# PCR IDs 0,2,4,6,7,8,9 — must match exactly
+ROOT_LUKS_DEVICE=$(pvs | grep systemvg | awk '{print $1}')
+ROOT_BACK_DEVICE=$(cryptsetup status $ROOT_LUKS_DEVICE | grep "device:" | awk '{print $2}')
+clevis luks bind -d $ROOT_BACK_DEVICE -k - <<<"INSECURE-default-CHANGEME" tpm2 \
+  '{"hash":"sha256","key":"ecc","pcr_bank":"sha256","pcr_ids":"0,2,4,6,7,8,9"}'
+
+# Clean up extra EFI boot entries (keep only the installer-created one)
 ESP_DEVICE=$(grep /boot/efi /proc/mounts | cut -f1 -d' ')
 ESP_UUID=$(blkid "${ESP_DEVICE}" -s PARTUUID -o value)
 BOOT_OPTION=$(efibootmgr -v | grep "${ESP_UUID}" | cut -c 5-8)
-for bootopt in $(efibootmgr -v | grep -E '^Boot[0-9]{4}' | grep 'HD('| cut -c 5-8); do
+for bootopt in $(efibootmgr -v | grep -E '^Boot[0-9]{4}' | grep 'HD(' | cut -c 5-8); do
   if [[ $bootopt != $BOOT_OPTION ]]; then
     efibootmgr --delete-bootnum --bootnum $bootopt
   fi
@@ -142,14 +331,17 @@ efibootmgr --bootorder $BOOT_OPTION
 
 %end
 
+# ---- POST (nochroot) ----
 %post --nochroot --log=/mnt/sysimage/root/ks-post2.log --interpreter=/usr/bin/bash --erroronfail
 set -xe -o pipefail
 
 umask 022
 
-rm /mnt/sysimage/etc/sysconfig/network-scripts/ifcfg-* -f
-#cp /etc/sysconfig/network-scripts/ifcfg-* /mnt/sysimage/etc/sysconfig/network-scripts/
+# Remove any ifcfg-style network scripts left by installer
+rm -f /mnt/sysimage/etc/sysconfig/network-scripts/ifcfg-* || true
 
 %end
 
+# Signal bootstrap.yaml that install is complete (power off, not reboot)
+# bootstrap.yaml detects PowerState == Off, then ejects virtual media before powering on
 shutdown
