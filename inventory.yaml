@@ -7,8 +7,9 @@ all:
     ldap_keys: yes
     ansible_ssh_user: "doesadm"
 
-    idrac_user: "root"
-    idrac_password: "{{ lookup('hashi_vault', 'secret=secret/data/idrac:password', ca_cert=lookup('env','VAULT_CACERT'))}}"
+    idrac_user: "root"   # As of 3/23/2026 Vault license expired.  Use a local ENV var to set password.
+    idrac_password: "{{ lookup('env', 'IDRAC_PASSWORD') }}"
+    #idrac_password: "{{ lookup('hashi_vault', 'secret=secret/data/idrac:password', ca_cert=lookup('env','VAULT_CACERT'))}}"
 
     desired_bios_version: "2.8.2"
     desired_idrac_version: "7.20.80.50"
@@ -110,8 +111,9 @@ uses_root_pw:
     # eaglei-wn-prod-04.ornl.gov: {}
     # eaglei-wn-prod-05.ornl.gov: {}
   vars:
-    ansible_ssh_user: root
-    ansible_ssh_pass: "{{ lookup('hashi_vault', 'secret=secret/data/doesadm:password', ca_cert=lookup('env','VAULT_CACERT'))}}"
+    ansible_ssh_user: root     # As of 3/23/2026 Vault license expired.  Use a local ENV var to set password.
+    ansible_ssh_pass: "{{ lookup('env', 'DOESADM_PASSWORD') }}"
+    # ansible_ssh_pass: "{{ lookup('hashi_vault', 'secret=secret/data/doesadm:password', ca_cert=lookup('env','VAULT_CACERT'))}}"
 
 # Environment separation
 test_nodes:
